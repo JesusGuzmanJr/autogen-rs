@@ -1,16 +1,21 @@
 pub mod agent;
 
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+pub use agent::Agent;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    #[derive(thiserror::Error, Debug)]
+    enum Error {}
+
+    #[tokio::test]
+    async fn test() {
+        let agent = Agent::new("test".to_string(), |message| async move {
+            println!("message: {:?}", message);
+            Result::<_, Error>::Ok(())
+        });
+
+        agent.send("hello".to_string());
     }
 }

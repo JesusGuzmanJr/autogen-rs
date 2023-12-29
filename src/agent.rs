@@ -1,3 +1,5 @@
+use std::{future::Future, pin::Pin};
+
 use {
     std::{fmt::Debug, time::Duration},
     tokio::{sync::mpsc::UnboundedSender, task::JoinHandle},
@@ -30,7 +32,9 @@ where
     /// Create a new agent.
     pub fn new<H, R>(name: String, on_message: H) -> Self
     where
-        H: Fn(M) -> Result<R, E> + Send + 'static,
+        // make H be a closure that takes an M and returns a future that resolves to a Result<R, E>
+        H: Fn(M) -> R + Send + Sync + 'static,
+        R: Future<Output = Result<(), E>> + Send + 'static,
     {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -42,7 +46,7 @@ where
 
                 while let Some(message) = receiver.recv().await {
                     tracing::trace!(name, %id, ?message, "received message");
-                    on_message(message)?;
+                    on_message(message).await?;
                 }
 
                 tracing::trace!(name, %id, "stopping");
