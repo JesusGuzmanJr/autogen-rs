@@ -162,13 +162,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Result;
+
     use super::*;
 
     type TokioSendError<T> = tokio::sync::mpsc::error::SendError<T>;
     type Error<T> = SendError<T>;
 
     #[tokio::test]
-    async fn test_actor_processes_message() -> Result<(), Error<&'static str>> {
+    async fn test_actor_processes_message() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
@@ -186,7 +188,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multiple_agents() -> Result<(), Error<&'static str>> {
+    async fn test_multiple_agents() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let agent_1 = AgentBuilder::new()
@@ -218,7 +220,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_terminate() -> Result<(), Error<&'static str>> {
+    async fn test_terminate() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
@@ -243,7 +245,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_terminate_timeout() -> Result<(), Error<&'static str>> {
+    async fn test_terminate_timeout() -> Result<()> {
         std::env::set_var(GRACE_PERIOD_ENV_VAR, "1");
         let grace_period = Duration::from_millis(1200);
 
@@ -272,7 +274,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_abort() -> Result<(), Error<&'static str>> {
+    async fn test_abort() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
