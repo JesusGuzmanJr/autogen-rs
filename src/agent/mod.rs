@@ -1,4 +1,8 @@
+//! A module for creating agents that can process messages asynchronously.
+
 use std::future::Future;
+
+pub mod user;
 
 use {
     std::{fmt::Debug, time::Duration},
@@ -15,7 +19,7 @@ const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(3);
 /// Error returned when trying to send a message to an agent that has been terminated.
 /// Returns the message that couldn't be sent.
 #[derive(thiserror::Error, Debug, PartialEq, Eq, Clone, Copy)]
-#[error("unable to send message to terminated agent")]
+#[error("unable to send message to terminated agent: {0:?}")]
 pub struct SendError<M>(pub M);
 
 /// A channel to send messages to an agent.
@@ -39,7 +43,7 @@ pub struct Agent<M, E> {
     /// A user-friendly name for the agent.
     pub name: Option<String>,
 
-    // /// A channel to send messages to the agent.
+    /// A channel to send messages to the agent.
     sender: UnboundedSender<M>,
 
     /// A handle to the agent's event loop.

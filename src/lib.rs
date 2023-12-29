@@ -1,5 +1,6 @@
 pub mod agent;
 
+pub use agent::user::UserAgent;
 pub use agent::Agent;
 
 #[cfg(test)]
