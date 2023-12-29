@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::future::Future;
 
 use {
     std::{fmt::Debug, time::Duration},
@@ -9,7 +9,24 @@ use {
 /// The amount of time to wait for an agent to terminate.
 const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(3);
 
+/// Error returned when trying to send a message to an agent that has been terminated.
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone, Copy)]
+#[error("unable to send message to terminated agent")]
+pub struct SendError<M>(pub M);
+
+/// A channel to send messages to an agent.
+#[derive(Debug, Clone)]
+pub struct Sender<M>(UnboundedSender<M>);
+
+impl<M> Sender<M> {
+    /// Send a message to the agent.
+    pub fn send(&self, message: M) -> Result<(), SendError<M>> {
+        self.0.send(message).map_err(|m| SendError(m.0))
+    }
+}
+
 /// A handle to an agent.
+#[derive(Debug)]
 pub struct Agent<M, E> {
     /// Unique identifier for the agent.
     pub id: Uuid,
@@ -32,7 +49,6 @@ where
     /// Create a new agent.
     pub fn new<H, R>(name: String, on_message: H) -> Self
     where
-        // make H be a closure that takes an M and returns a future that resolves to a Result<R, E>
         H: Fn(M) -> R + Send + Sync + 'static,
         R: Future<Output = Result<(), E>> + Send + 'static,
     {
@@ -68,7 +84,7 @@ where
     pub async fn terminate(self) {
         drop(self.sender); // drop the sender to signal the agent to stop.
         tokio::time::sleep(
-            std::env::var("GRACE_PERIOD_SECONDS")
+            std::env::var("AGENT_GRACE_PERIOD_SECONDS")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .map(Duration::from_secs)
@@ -80,7 +96,12 @@ where
     }
 
     /// Send a message to the agent.
-    pub fn send(&self, message: M) {
-        self.sender.send(message).unwrap();
+    pub fn send(&self, message: M) -> Result<(), SendError<M>> {
+        self.sender.send(message).map_err(|e| SendError(e.0))
+    }
+
+    /// Returns a sender that can be used to send messages to the agent.
+    pub fn sender(&self) -> Sender<M> {
+        Sender(self.sender.clone())
     }
 }
