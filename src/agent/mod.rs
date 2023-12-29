@@ -1,7 +1,8 @@
-//! A module for creating agents that can process messages asynchronously.
+//! Tools for creating tokio-based agents.
 
 use std::future::Future;
 
+pub mod assistant;
 pub mod user;
 
 use {
@@ -10,17 +11,18 @@ use {
     uuid::Uuid,
 };
 
-/// The AGENT_GRACE_PERIOD_SECONDS environment variable can be used to override the default grace period.
+/// Error returned when trying to send a message to an agent that has been
+/// terminated. Returns the message that couldn't be sent.
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone, Copy)]
+#[error("unable to send message to terminated agent: {0:?}")]
+pub struct SendError<M>(pub M);
+
+/// The AGENT_GRACE_PERIOD_SECONDS environment variable can be used to override
+/// the default grace period.
 const GRACE_PERIOD_ENV_VAR: &str = "AGENT_GRACE_PERIOD_SECONDS";
 
 /// The amount of time to wait for an agent to terminate.
 const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(3);
-
-/// Error returned when trying to send a message to an agent that has been terminated.
-/// Returns the message that couldn't be sent.
-#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone, Copy)]
-#[error("unable to send message to terminated agent: {0:?}")]
-pub struct SendError<M>(pub M);
 
 /// A channel to send messages to an agent.
 #[derive(Debug, Clone)]
@@ -143,7 +145,8 @@ where
         tracing::trace!(name = self.name, id = %self.id, "stopped (gracefully terminated)");
     }
 
-    /// Aborts the agent's event loop immediately without waiting for it to finish.
+    /// Aborts the agent's event loop immediately without waiting for it to
+    /// finish.
     pub fn abort(self) {
         self.handle.abort();
         tracing::trace!(name = self.name, id = %self.id, "stopped (aborted)");
@@ -162,9 +165,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-
-    use super::*;
+    use {super::*, anyhow::Result};
 
     type TokioSendError<T> = tokio::sync::mpsc::error::SendError<T>;
     type Error<T> = SendError<T>;

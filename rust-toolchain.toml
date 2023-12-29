@@ -1,0 +1,6 @@
+# This file is used to pin the rust toolchain to a specific nightly version.
+# For more info, see: https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file
+
+[toolchain]
+# We pin the nightly toolchain so we can have reproducible builds.
+channel = "nightly-2023-12-01"

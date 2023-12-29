@@ -1,8 +1,7 @@
-//! A proxy agent for the user.
+//! A proxy agent for the user. Every time the agent receives a message, it asks
+//! the user for input and sends the input back to the sender of the message.
 
-use super::Sender;
-use crate::Agent;
-use uuid::Uuid;
+use {super::Sender, crate::Agent, uuid::Uuid};
 
 /// Errors that can occur when sending a message to a user agent.
 #[derive(thiserror::Error, Debug)]
@@ -29,7 +28,32 @@ pub struct Message {
     pub content: String,
 }
 
-/// A user agent.
+/// A user proxy agent.
+///
+/// Usage:
+/// ```
+/// # use autogen_rs::agent::user::Message;
+/// # use autogen_rs::agent::user::UserAgentBuilder;
+/// # use autogen_rs::agent::AgentBuilder;
+/// # tokio_test::block_on(async {
+/// #   let assistant = AgentBuilder::new()
+/// #      .handler(move |message: String| {
+/// #          async move {
+/// #              std::io::Result::Ok(())
+/// #          }
+/// #      })
+/// #      .sender();
+/// let user_agent = UserAgentBuilder::new().with_name("user-agent").build();
+/// // start the conversation by sending a message to the user agent
+/// user_agent.send(Message {
+///     // the LLM assistant is the originator of the message
+///     sender: assistant,
+///     content: "What can I do for you?".to_string(),
+/// })?;
+/// # anyhow::Ok(())
+/// # });
+
+/// ````
 #[derive(Debug)]
 pub struct UserAgent {
     agent: Agent<Message, Error>,
@@ -68,7 +92,8 @@ impl UserAgent {
         self.agent.terminate().await;
     }
 
-    /// Aborts the agent's event loop immediately without waiting for it to finish.
+    /// Aborts the agent's event loop immediately without waiting for it to
+    /// finish.
     pub fn abort(self) {
         self.agent.abort()
     }

@@ -1,13 +1,14 @@
+//! Autogen-rs is a Rust library for building AI agents.
+
 pub mod agent;
 
-pub use agent::user::UserAgent;
-pub use agent::Agent;
+pub use agent::{user::UserAgent, Agent};
 
+/// Init logger for unit tests.
 #[cfg(test)]
 #[ctor::ctor]
 fn init() {
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
     tracing_subscriber::registry()
         .with(
