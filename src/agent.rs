@@ -34,13 +34,53 @@ pub struct Agent<M, E> {
     pub id: Uuid,
 
     /// A user-friendly name for the agent.
-    pub name: String,
+    pub name: Option<String>,
 
-    /// A channel to send messages to the agent.
+    // /// A channel to send messages to the agent.
     sender: UnboundedSender<M>,
 
     /// A handle to the agent's event loop.
     handle: JoinHandle<Result<(), E>>,
+}
+
+#[derive(Debug, Default)]
+pub struct AgentBuilder {
+    /// Unique identifier for the agent.
+    pub id: Option<Uuid>,
+
+    /// A user-friendly name for the agent.
+    pub name: Option<String>,
+}
+
+impl AgentBuilder {
+    /// Create a new agent builder.
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Set the id of the agent.
+    pub fn with_id(mut self, id: Uuid) -> Self {
+        self.id = Some(id);
+        self
+    }
+
+    /// Set the name of the agent.
+    pub fn with_name(mut self, name: impl ToString) -> Self {
+        self.name = Some(name.to_string());
+        self
+    }
+
+    /// Create a new agent with the given message handler consuming the builder.
+    pub fn handler<M, H, R, E>(self, handler: H) -> Agent<M, E>
+    where
+        M: Debug + Send + 'static,
+        E: std::error::Error + Send + Sync + 'static,
+        H: Fn(M) -> R + Send + Sync + 'static,
+        R: Future<Output = Result<(), E>> + Send + 'static,
+    {
+        let id = self.id.unwrap_or_else(Uuid::new_v4);
+        Agent::spawn(id, self.name, handler)
+    }
 }
 
 impl<M, E> Agent<M, E>
@@ -49,14 +89,13 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     /// Create a new agent.
-    pub fn new<H, R>(name: String, on_message: H) -> Self
+    pub fn spawn<H, R>(id: Uuid, name: Option<String>, handler: H) -> Self
     where
         H: Fn(M) -> R + Send + Sync + 'static,
         R: Future<Output = Result<(), E>> + Send + 'static,
     {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
-        let id = Uuid::new_v4();
         let handle = {
             let name = name.clone();
             tokio::spawn(async move {
@@ -64,7 +103,7 @@ where
 
                 while let Some(message) = receiver.recv().await {
                     tracing::trace!(name, %id, ?message, "received message");
-                    on_message(message).await?;
+                    handler(message).await?;
                 }
 
                 tracing::trace!(name, %id, "stopping");
@@ -115,15 +154,11 @@ mod tests {
     type TokioSendError<T> = tokio::sync::mpsc::error::SendError<T>;
     type Error<T> = SendError<T>;
 
-    fn agent_id(id: usize) -> String {
-        format!("agent {}", id)
-    }
-
     #[tokio::test]
     async fn test_actor_processes_message() -> Result<(), Error<&'static str>> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let agent = Agent::new(agent_id(1), move |message| {
+        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
             let tx = tx.clone();
             async move {
                 tx.send(message)?;
@@ -141,22 +176,27 @@ mod tests {
     async fn test_multiple_agents() -> Result<(), Error<&'static str>> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let agent_1 = Agent::new(agent_id(1), move |message| {
-            let tx = tx.clone();
-            async move {
-                tx.send(message)?;
-                Result::<_, TokioSendError<_>>::Ok(())
-            }
-        })
-        .sender();
+        let agent_1 = AgentBuilder::new()
+            .with_name("1")
+            .handler(move |message| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(message)?;
+                    Result::<_, TokioSendError<_>>::Ok(())
+                }
+            })
+            .sender();
 
-        let agent_2 = Agent::new(agent_id(2), move |message| {
-            let agent_1 = agent_1.clone();
-            async move {
-                agent_1.send(message)?;
-                Result::<_, Error<&'static str>>::Ok(())
-            }
-        });
+        let agent_2 = AgentBuilder::new()
+            .with_id(Uuid::new_v4())
+            .with_name("2")
+            .handler(move |message| {
+                let agent_1 = agent_1.clone();
+                async move {
+                    agent_1.send(message)?;
+                    Result::<_, Error<&'static str>>::Ok(())
+                }
+            });
 
         let message = "hello world";
         agent_2.send(message)?;
