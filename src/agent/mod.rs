@@ -6,6 +6,9 @@ use {
     uuid::Uuid,
 };
 
+/// The AGENT_GRACE_PERIOD_SECONDS environment variable can be used to override the default grace period.
+const GRACE_PERIOD_ENV_VAR: &str = "AGENT_GRACE_PERIOD_SECONDS";
+
 /// The amount of time to wait for an agent to terminate.
 const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(3);
 
@@ -125,7 +128,7 @@ where
     pub async fn terminate(self) {
         drop(self.sender); // drop the sender to signal the agent to stop.
         tokio::time::sleep(
-            std::env::var("AGENT_GRACE_PERIOD_SECONDS")
+            std::env::var(GRACE_PERIOD_ENV_VAR)
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .map(Duration::from_secs)
@@ -133,7 +136,13 @@ where
         )
         .await;
         self.handle.abort();
-        tracing::trace!(name = self.name, id = %self.id, "terminated");
+        tracing::trace!(name = self.name, id = %self.id, "stopped (gracefully terminated)");
+    }
+
+    /// Aborts the agent's event loop immediately without waiting for it to finish.
+    pub fn abort(self) {
+        self.handle.abort();
+        tracing::trace!(name = self.name, id = %self.id, "stopped (aborted)");
     }
 
     /// Send a message to the agent.
@@ -201,6 +210,86 @@ mod tests {
         let message = "hello world";
         agent_2.send(message)?;
         assert_eq!(rx.recv().await, Some(message));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_terminate() -> Result<(), Error<&'static str>> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
+            let tx = tx.clone();
+            async move {
+                tx.send(message)?;
+                Result::<_, TokioSendError<_>>::Ok(())
+            }
+        });
+
+        let message = "hello world";
+        agent.send(message)?;
+        agent.terminate().await;
+
+        assert_eq!(
+            rx.recv().await,
+            Some(message),
+            "testing that the message gets processed before the agent terminates"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_terminate_timeout() -> Result<(), Error<&'static str>> {
+        std::env::set_var(GRACE_PERIOD_ENV_VAR, "1");
+        let grace_period = Duration::from_millis(1200);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
+            let tx = tx.clone();
+            async move {
+                tokio::time::sleep(grace_period).await;
+                tx.send(message)?;
+                Result::<_, TokioSendError<_>>::Ok(())
+            }
+        });
+
+        let message = "hello world";
+        agent.send(message)?;
+        agent.terminate().await;
+
+        assert_eq!(
+            rx.recv().await,
+            None,
+            "testing that the message doesn't get placed on the channel because the agent took too long"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_abort() -> Result<(), Error<&'static str>> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
+            let tx = tx.clone();
+            async move {
+                tx.send(message)?;
+                Result::<_, TokioSendError<_>>::Ok(())
+            }
+        });
+
+        let message = "hello world";
+        agent.send(message)?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        agent.abort();
+
+        assert_eq!(
+            rx.recv().await,
+            Some(message),
+            "testing that the agent places the message on the channel before it aborts"
+        );
+
         Ok(())
     }
 }
