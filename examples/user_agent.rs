@@ -41,7 +41,8 @@ async fn main() -> Result<()> {
         content: "What can I do for you?".to_string(),
     })?;
 
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    // TODO: this is a hack to keep the program running
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
     tracing::debug!("<conversation ended>");
     Ok(())

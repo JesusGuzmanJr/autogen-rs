@@ -57,25 +57,6 @@ impl UserAgent {
         Self { agent }
     }
 
-    /// Send a message to the user agent.
-    pub fn send(&self, message: Message) -> Result<(), Error> {
-        self.agent.send(Box::new(message))?;
-        Ok(())
-    }
-
-    /// Terminates the agent by closing its message channel and waiting for it
-    /// to finish processing remaining messages. Consumes the agent since it
-    /// can no longer process messages.
-    pub async fn terminate(self) {
-        self.agent.terminate().await;
-    }
-
-    /// Aborts the agent's event loop immediately without waiting for it to
-    /// finish.
-    pub fn abort(self) {
-        self.agent.abort()
-    }
-
     /// Returns a sender that can be used to send messages to the user agent.
     pub fn sender(&self) -> Sender<Box<Message>> {
         Sender(self.agent.sender.clone())
@@ -126,6 +107,14 @@ impl Actor for UserAgent {
     /// Returns the user agent's name
     fn name(&self) -> Option<&str> {
         self.agent.name.as_deref()
+    }
+
+    async fn terminate(self) {
+        self.agent.terminate().await;
+    }
+
+    fn abort(self) {
+        self.agent.abort()
     }
 
     fn send(&self, message: Self::Message) -> Result<(), Self::Error> {
