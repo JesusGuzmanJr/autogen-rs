@@ -106,5 +106,10 @@ To run the code, you will need to have Rust installed. You'll need a nightly ver
 - To run the `user_agent` example: `RUST_LOG=debug cargo run --example user_agent`
 - To view docs: `cargo doc --open`
 
+## Diagram of the `user_agent` example
+
+In this diagram we see the `user_agent` sending an initial message to the user (which means printing to the console). The user is grayed out to indicate it's not a real component in our library. Similarly, the sample code in this repo doesn't actually make an api call to OpenAI. This is trivial example of a conversation between two agents.
+
+![user_agent diagram](./diagram.svg)
 
 
