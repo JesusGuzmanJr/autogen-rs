@@ -1,15 +1,18 @@
 //! Example of a user agent that sends a message to an assistant
+#![feature(lazy_cell)]
 
 use {
     anyhow::Result,
     autogen_rs::agent::{
-        user::{Message, UserAgentBuilder},
-        AgentBuilder,
+        assistant::AssistantBuilder, user::UserAgentBuilder, Actor, Message, Sender,
     },
+    dashmap::DashMap,
+    std::sync::LazyLock,
     tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt},
+    uuid::Uuid,
 };
 
-type TokioSendError<T> = tokio::sync::mpsc::error::SendError<T>;
+static AGENTS: LazyLock<DashMap<Uuid, Sender<Box<Message>>>> = LazyLock::new(DashMap::new);
 
 /// Invoking the example:
 /// ```zsh
@@ -26,40 +29,19 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
-    let assistant_name = "assistant";
-    let assistant = AgentBuilder::new()
-        .with_name(assistant_name)
-        .handler(move |message| {
-            let tx = tx.clone();
-            async move {
-                // just echo the message back
-                tracing::debug!(
-                    name = assistant_name,
-                    message,
-                    "received message; normally this message would be sent to OpenAI but for this example we just echo it back"
-                );
-                let response = message;
-                tx.send(response)?;
-
-                Result::<_, TokioSendError<_>>::Ok(())
-            }
-        })
-        .sender();
+    let assistant = AssistantBuilder::new().with_name("assistant").build();
+    AGENTS.insert(assistant.id(), assistant.sender());
 
     let user_agent = UserAgentBuilder::new().with_name("user-agent").build();
+    AGENTS.insert(user_agent.id(), user_agent.sender());
 
     // start the conversation by sending a message to the user agent
     user_agent.send(Message {
-        // the LLM assistant is the originator of the message
-        sender: assistant,
+        sender: assistant.sender(),
         content: "What can I do for you?".to_string(),
     })?;
 
-    if let Some(response) = rx.recv().await {
-        tracing::debug!(response, "received response");
-    }
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
     tracing::debug!("<conversation ended>");
     Ok(())

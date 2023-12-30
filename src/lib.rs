@@ -1,6 +1,6 @@
 //! Autogen-rs is a Rust library for building AI agents.
-
 pub mod agent;
+pub mod chat;
 
 pub use agent::{user::UserAgent, Agent};
 

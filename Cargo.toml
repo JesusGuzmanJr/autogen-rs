@@ -25,5 +25,6 @@ uuid = {version = "1.3", features = [
 [dev-dependencies]
 anyhow = "1.0"
 ctor = "0.2"
+dashmap = "5.5.3"
 tokio-test = "0.4.3"
 tracing-subscriber = {version = "0.3", features = ["env-filter"]}

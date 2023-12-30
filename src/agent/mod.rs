@@ -2,6 +2,9 @@
 
 use std::future::Future;
 
+mod actor;
+
+pub use actor::Actor;
 pub mod assistant;
 pub mod user;
 
@@ -23,6 +26,16 @@ const GRACE_PERIOD_ENV_VAR: &str = "AGENT_GRACE_PERIOD_SECONDS";
 
 /// The amount of time to wait for an agent to terminate.
 const DEFAULT_GRACE_PERIOD: Duration = Duration::from_secs(3);
+
+/// Messages that can be sent to an actor;.
+#[derive(Debug, Clone)]
+pub struct Message {
+    /// The sender to reply to.
+    pub sender: Sender<Box<Message>>,
+
+    /// The content of the to prompt the user.
+    pub content: String,
+}
 
 /// A channel to send messages to an agent.
 #[derive(Debug, Clone)]
@@ -52,46 +65,6 @@ pub struct Agent<M, E> {
     handle: JoinHandle<Result<(), E>>,
 }
 
-#[derive(Debug, Default)]
-pub struct AgentBuilder {
-    /// Unique identifier for the agent.
-    pub id: Option<Uuid>,
-
-    /// A user-friendly name for the agent.
-    pub name: Option<String>,
-}
-
-impl AgentBuilder {
-    /// Create a new agent builder.
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    /// Set the id of the agent.
-    pub fn with_id(mut self, id: Uuid) -> Self {
-        self.id = Some(id);
-        self
-    }
-
-    /// Set the name of the agent.
-    pub fn with_name(mut self, name: impl ToString) -> Self {
-        self.name = Some(name.to_string());
-        self
-    }
-
-    /// Create a new agent with the given message handler consuming the builder.
-    pub fn handler<M, H, R, E>(self, handler: H) -> Agent<M, E>
-    where
-        M: Debug + Send + 'static,
-        E: std::error::Error + Send + Sync + 'static,
-        H: Fn(M) -> R + Send + Sync + 'static,
-        R: Future<Output = Result<(), E>> + Send + 'static,
-    {
-        let id = self.id.unwrap_or_else(Uuid::new_v4);
-        Agent::spawn(id, self.name, handler)
-    }
-}
-
 impl<M, E> Agent<M, E>
 where
     M: Debug + Send + 'static,
@@ -100,19 +73,20 @@ where
     /// Create a new agent.
     pub fn spawn<H, R>(id: Uuid, name: Option<String>, handler: H) -> Self
     where
-        H: Fn(M) -> R + Send + Sync + 'static,
+        H: Fn(Sender<M>, M) -> R + Send + Sync + 'static,
         R: Future<Output = Result<(), E>> + Send + 'static,
     {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = {
             let name = name.clone();
+            let sender = sender.clone();
             tokio::spawn(async move {
                 tracing::trace!(name, %id, "starting",);
 
                 while let Some(message) = receiver.recv().await {
                     tracing::trace!(name, %id, ?message, "received message");
-                    handler(message).await?;
+                    handler(Sender(sender.clone()), message).await?;
                 }
 
                 tracing::trace!(name, %id, "stopping");
@@ -174,13 +148,17 @@ mod tests {
     async fn test_actor_processes_message() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
-            let tx = tx.clone();
-            async move {
-                tx.send(message)?;
-                Result::<_, TokioSendError<_>>::Ok(())
-            }
-        });
+        let agent = Agent::spawn(
+            Uuid::new_v4(),
+            Some("1".to_string()),
+            move |_sender, message| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(message)?;
+                    Result::<_, TokioSendError<_>>::Ok(())
+                }
+            },
+        );
 
         let message = "hello world";
         agent.send(message)?;
@@ -192,27 +170,30 @@ mod tests {
     async fn test_multiple_agents() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let agent_1 = AgentBuilder::new()
-            .with_name("1")
-            .handler(move |message| {
+        let agent_1 = Agent::spawn(
+            Uuid::new_v4(),
+            Some("1".to_string()),
+            move |_sender, message| {
                 let tx = tx.clone();
                 async move {
                     tx.send(message)?;
                     Result::<_, TokioSendError<_>>::Ok(())
                 }
-            })
-            .sender();
+            },
+        )
+        .sender();
 
-        let agent_2 = AgentBuilder::new()
-            .with_id(Uuid::new_v4())
-            .with_name("2")
-            .handler(move |message| {
+        let agent_2 = Agent::spawn(
+            Uuid::new_v4(),
+            Some("2".to_string()),
+            move |_sender, message| {
                 let agent_1 = agent_1.clone();
                 async move {
                     agent_1.send(message)?;
                     Result::<_, Error<&'static str>>::Ok(())
                 }
-            });
+            },
+        );
 
         let message = "hello world";
         agent_2.send(message)?;
@@ -224,13 +205,17 @@ mod tests {
     async fn test_terminate() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
-            let tx = tx.clone();
-            async move {
-                tx.send(message)?;
-                Result::<_, TokioSendError<_>>::Ok(())
-            }
-        });
+        let agent = Agent::spawn(
+            Uuid::new_v4(),
+            Some("1".to_string()),
+            move |_sender, message| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(message)?;
+                    Result::<_, TokioSendError<_>>::Ok(())
+                }
+            },
+        );
 
         let message = "hello world";
         agent.send(message)?;
@@ -252,14 +237,18 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
-            let tx = tx.clone();
-            async move {
-                tokio::time::sleep(grace_period).await;
-                tx.send(message)?;
-                Result::<_, TokioSendError<_>>::Ok(())
-            }
-        });
+        let agent = Agent::spawn(
+            Uuid::new_v4(),
+            Some("1".to_string()),
+            move |_sender, message| {
+                let tx = tx.clone();
+                async move {
+                    tokio::time::sleep(grace_period).await;
+                    tx.send(message)?;
+                    Result::<_, TokioSendError<_>>::Ok(())
+                }
+            },
+        );
 
         let message = "hello world";
         agent.send(message)?;
@@ -278,13 +267,17 @@ mod tests {
     async fn test_abort() -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
-        let agent = Agent::spawn(Uuid::new_v4(), Some("1".to_string()), move |message| {
-            let tx = tx.clone();
-            async move {
-                tx.send(message)?;
-                Result::<_, TokioSendError<_>>::Ok(())
-            }
-        });
+        let agent = Agent::spawn(
+            Uuid::new_v4(),
+            Some("1".to_string()),
+            move |_sender, message| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(message)?;
+                    Result::<_, TokioSendError<_>>::Ok(())
+                }
+            },
+        );
 
         let message = "hello world";
         agent.send(message)?;

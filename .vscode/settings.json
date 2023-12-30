@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "autogen",
+        "dashmap",
         "Dogfooding",
         "Eleuther",
         "mpsc",
@@ -12,5 +13,6 @@
         "struct",
         "structs",
         "thiserror"
-    ]
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
 }
